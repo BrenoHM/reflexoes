@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+[x-cloak] {
+    display: none !important;
+}
+
+/*
+ * O atributo nativo [hidden] tem a mesma especificidade que classes de
+ * display do Tailwind (ex: .inline-flex), então, sem isso, um elemento com
+ * hidden + inline-flex fica visível mesmo assim (a regra do Tailwind, por
+ * vir depois no CSS, vence). Usado pelos controles de "Ouvir reflexão".
+ */
+[hidden] {
+    display: none !important;
+}
