@@ -22,7 +22,7 @@ services:
     # plano do Render não suportar Pre-Deploy Command, rode manualmente via
     # Shell (ver README) - nunca deixe uma migration pendente com a
     # aplicação nova já no ar.
-    preDeployCommand: php artisan migrate --force
+    # preDeployCommand: php artisan migrate --force
 
     envVars:
       # --- Aplicação ---
