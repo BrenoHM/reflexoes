@@ -12,7 +12,15 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // O Render fica atrás de um proxy reverso que termina o HTTPS e
+        // repassa a requisição internamente por HTTP, sinalizando o
+        // protocolo original via X-Forwarded-Proto. Sem confiar nesse
+        // proxy, url()/asset()/redirect() geram links http:// e o cookie
+        // de sessão "secure" nunca seria enviado. Não dá para restringir
+        // por IP porque o Render não publica um range fixo, então
+        // confiamos em qualquer proxy imediato (o próprio container nunca
+        // fica exposto diretamente à internet).
+        $middleware->trustProxies(at: '*');
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

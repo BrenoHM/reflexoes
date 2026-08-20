@@ -1,0 +1,90 @@
+# Render Blueprint - ver "Deploy no Render" no README para o passo a passo
+# completo. Nenhum valor sensível fica aqui (ver seção 30 do prompt de
+# origem); tudo marcado com "sync: false" precisa ser preenchido manualmente
+# no dashboard do Render, em Environment.
+#
+# IMPORTANTE: o Render não oferece banco MySQL gerenciado nativamente (só
+# PostgreSQL e Redis/Key Value). Este Blueprint NÃO cria um banco - DB_HOST/
+# DB_PORT/DB_DATABASE/DB_USERNAME/DB_PASSWORD devem apontar para um MySQL
+# externo (ver README). Isso é uma decisão que depende de qual provedor você
+# escolher; não foi presumido aqui.
+services:
+  - type: web
+    name: reflexoes-faustina
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+
+    # Roda a cada deploy, antes da nova versão assumir o tráfego. Se o seu
+    # plano do Render não suportar Pre-Deploy Command, rode manualmente via
+    # Shell (ver README) - nunca deixe uma migration pendente com a
+    # aplicação nova já no ar.
+    preDeployCommand: php artisan migrate --force
+
+    envVars:
+      # --- Aplicação ---
+      - key: APP_NAME
+        value: "Reflexões Diárias de Santa Faustina"
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_TIMEZONE
+        value: America/Sao_Paulo
+      - key: APP_LOCALE
+        value: pt_BR
+      - key: APP_FALLBACK_LOCALE
+        value: en
+      # Gere uma vez com "php artisan key:generate --show" e cole aqui pelo
+      # dashboard. NUNCA rodar key:generate a cada deploy (invalidaria
+      # sessões e dados criptografados existentes a cada novo deploy).
+      - key: APP_KEY
+        sync: false
+      # Inicialmente https://reflexoes-faustina.onrender.com (o Render
+      # informa a URL exata após o primeiro deploy); troque para o domínio
+      # próprio quando ele existir - é só essa variável, sem mudar código.
+      - key: APP_URL
+        sync: false
+
+      # --- Logs ---
+      # "stderr" (não "stack"/"single") para os logs aparecerem no painel do
+      # Render - ele só captura stdout/stderr do container, não arquivos
+      # dentro dele.
+      - key: LOG_CHANNEL
+        value: stderr
+      - key: LOG_LEVEL
+        value: info
+
+      # --- Banco de dados (MySQL externo - ver aviso no topo do arquivo) ---
+      - key: DB_CONNECTION
+        value: mysql
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "3306"
+      - key: DB_DATABASE
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+
+      # --- Cache / sessão / fila ---
+      # "database": já usa o MySQL configurado acima, sem exigir Redis nem
+      # nenhum serviço adicional para uma primeira implantação.
+      - key: CACHE_STORE
+        value: database
+      - key: SESSION_DRIVER
+        value: database
+      - key: QUEUE_CONNECTION
+        value: sync
+
+    # PIX_KEY / PIX_RECEIVER_NAME / PIX_BANK / PIX_MERCHANT_CITY não estão
+    # listadas de propósito: config/donation.php já traz os valores reais
+    # como default (a chave Pix não é segredo - é feita para ser pública), e
+    # duplicar aqui só criaria uma segunda fonte de verdade. Defina-as aqui
+    # apenas se algum dia precisar de um valor diferente do padrão do
+    # código, sem precisar alterá-lo.

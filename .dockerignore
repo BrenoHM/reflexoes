@@ -1,0 +1,38 @@
+# Segredos e configuração local - nunca podem entrar na imagem
+.env
+.env.*
+!.env.example
+
+# Reinstalados dentro da imagem (fresh, para o Linux do container); copiar
+# os do host arriscaria levar binários/estado específicos do Windows.
+/vendor
+/node_modules
+
+# Controle de versão, editores e ferramentas de IA
+.git
+.github
+.claude
+.codex
+.cursor
+.idea
+.vscode
+.zed
+.nova
+
+# Gerados localmente pelo dev - a imagem regenera tudo isso sozinha
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/storage/framework/cache/data/*
+/storage/framework/sessions/*
+/storage/framework/testing/*
+/storage/framework/views/*
+/storage/logs/*
+/storage/pail
+/bootstrap/cache/*.php
+.phpunit.result.cache
+.phpunit.cache
+
+# Não necessários na imagem de produção
+/tests

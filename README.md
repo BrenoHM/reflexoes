@@ -23,9 +23,9 @@ consulta as reflexões em um painel próprio.
 
 ## Requisitos
 
-- PHP 8.3+ (testado com 8.5)
+- PHP 8.4+ (testado com 8.5; é a versão usada em produção)
 - Composer
-- Docker + Docker Compose (para o MySQL)
+- Docker + Docker Compose (para o MySQL local e para o build de produção)
 - Node.js / npm
 
 ## Instalação
@@ -89,8 +89,8 @@ DB_ROOT_PASSWORD=secret   # usada apenas pelo container, não pelo Laravel
 
 ## Administrador inicial
 
-O `AdminUserSeeder` cria (ou atualiza) o administrador a partir de três
-variáveis do `.env`:
+**Em desenvolvimento local**, o `AdminUserSeeder` cria (ou atualiza) o
+administrador a partir de três variáveis do `.env`:
 
 ```
 ADMIN_NAME="Administrador"
@@ -98,11 +98,25 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=change-me-please
 ```
 
-Nenhuma senha real está hardcoded no código. Em ambiente local, defina essas
-variáveis no seu `.env` **antes** de rodar `php artisan db:seed` (ou
-`migrate --seed`). Se `ADMIN_PASSWORD` não estiver definida, o seeder gera
-uma senha aleatória e a imprime uma única vez no console — troque-a assim
-que possível.
+Nenhuma senha real está hardcoded no código. Defina essas variáveis no seu
+`.env` **antes** de rodar `php artisan db:seed` (ou `migrate --seed`). Se
+`ADMIN_PASSWORD` não estiver definida, o seeder gera uma senha aleatória e a
+imprime uma única vez no console — troque-a assim que possível.
+
+**Em produção**, não use o seeder (ele também popula reflexões de exemplo
+fictícias, que não fazem sentido fora do ambiente local). Use o comando
+interativo, que nunca grava a senha em variável de ambiente, log ou
+histórico do shell:
+
+```bash
+php artisan admin:create
+```
+
+Ele pede nome, e-mail e senha (com confirmação) interativamente. Rodando de
+novo com um e-mail que já existe, ele pergunta antes de sobrescrever a senha
+— ou aceite direto com `--force`. Também aceita `--name`, `--email` e
+`--password` para uso em script, mas evite `--password` em produção: o valor
+fica no histórico do shell.
 
 Login: `http://127.0.0.1:8000/login`
 Painel: `http://127.0.0.1:8000/admin`
@@ -185,10 +199,19 @@ serviço externo, API paga ou biblioteca de terceiros.
 ## Estrutura principal
 
 ```
+Dockerfile                                    # imagem de produção (multi-stage)
+render.yaml                                   # Render Blueprint
+docker/
+├── apache/                                   # vhost + porta (Render injeta $PORT)
+├── php/production.ini                        # opcache e afins, só na imagem de produção
+└── entrypoint.sh                             # cache de config/rotas/views + sobe o Apache
+
 app/
+├── Console/Commands/AdminCreateCommand.php   # `php artisan admin:create`
 ├── Http/
 │   ├── Controllers/
 │   │   ├── HomeController.php              # página pública
+│   │   ├── HealthController.php            # GET /health (Render)
 │   │   ├── ProfileController.php           # perfil do administrador
 │   │   └── Admin/
 │   │       ├── DashboardController.php
@@ -249,8 +272,9 @@ existia na versão anterior foi removida — não há mais o conceito de
 - **Soft delete:** reflexões excluídas usam `deleted_at`, nunca são
   sorteadas na página pública e não aparecem na listagem administrativa
   padrão.
-- **Sem autocadastro:** o único administrador é criado pelo
-  `AdminUserSeeder`; a rota `/register` do Breeze foi removida.
+- **Sem autocadastro:** o administrador é criado pelo `AdminUserSeeder`
+  (local) ou por `php artisan admin:create` (produção); a rota `/register`
+  do Breeze foi removida.
 
 ## Testes
 
@@ -277,7 +301,12 @@ Os testes usam SQLite em memória (configurado no `phpunit.xml`) e cobrem:
 - seção de doação na Home: presença do QR Code (SVG) e do código Pix
   Copia e Cola, sem valores fixos sugeridos;
 - botão "Ouvir reflexão": aparece só quando há reflexão, dados de fala
-  publicados corretamente, HTML removido do texto narrado.
+  publicados corretamente, HTML removido do texto narrado;
+- `GET /health` responde 200 com `{"status":"ok"}`;
+- `php artisan admin:create`: cria e atualiza administrador (interativo e
+  via opções), pede confirmação antes de sobrescrever um e-mail existente
+  (exceto com `--force`), rejeita senhas que não conferem na confirmação, e
+  nunca imprime a senha na saída do comando.
 
 O JavaScript de síntese de voz (`text-to-speech.js`) não tem testes
 automatizados em Node — o projeto não usa nenhum test runner de JS — mas
@@ -289,6 +318,201 @@ ausência de fila em cliques repetidos, texto com acentos/aspas/HTML
 misturado, teclado (foco e ativação por Enter) e ausência de scroll
 horizontal no mobile.
 
+## Deploy no Render
+
+O projeto está preparado para build via Docker no Render, a partir do
+`Dockerfile` (multi-stage: Composer → npm/Vite → imagem final com Apache +
+PHP 8.5) e do `render.yaml` (Render Blueprint). Esta seção documenta o
+passo a passo do **primeiro** deploy.
+
+> **Antes de tudo:** o Render não oferece um serviço de MySQL gerenciado
+> nativo — só PostgreSQL e Redis/Key Value. Este projeto mantém MySQL (por
+> pedido explícito, sem migrar de banco), então você precisa de um MySQL
+> externo antes de começar. Opções comuns: um provedor de MySQL gerenciado
+> (PlanetScale, Aiven, Railway, AWS RDS etc.) ou seu próprio servidor MySQL
+> acessível pela internet. Isso é uma decisão de infraestrutura que só você
+> pode tomar — o projeto funciona com qualquer host MySQL, desde que as
+> variáveis `DB_HOST`/`DB_PORT`/`DB_DATABASE`/`DB_USERNAME`/`DB_PASSWORD`
+> apontem para ele corretamente.
+
+### 1. GitHub
+
+Suba o projeto para um repositório no GitHub (`.env` fica de fora
+automaticamente — está no `.gitignore`):
+
+```bash
+git remote add origin <url-do-seu-repositorio>
+git push -u origin master
+```
+
+### 2. Render
+
+No [dashboard do Render](https://dashboard.render.com):
+
+- **Com Blueprint (recomendado):** New → Blueprint → selecione o
+  repositório. O Render lê o `render.yaml` da raiz e propõe criar o Web
+  Service já configurado (build via Docker, health check em `/health`,
+  plano gratuito). Revise e confirme.
+- **Manual:** New → Web Service → selecione o repositório → Environment:
+  **Docker** (o Render detecta o `Dockerfile` na raiz automaticamente).
+
+O Render valida o `render.yaml` ao conectar o Blueprint; a sintaxe de
+serviços/variáveis pode evoluir entre versões do Render, então se algum
+campo for rejeitado, o próprio Render aponta qual — ajuste conforme
+indicado.
+
+### 3. Configurar Environment Variables
+
+No painel do serviço, em **Environment**, preencha as variáveis marcadas
+como obrigatórias no `render.yaml` (não têm valor no arquivo de propósito —
+nenhum dado sensível fica versionado):
+
+```
+APP_KEY=              # gere com: php artisan key:generate --show
+APP_URL=               # ex.: https://reflexoes-faustina.onrender.com
+
+DB_HOST=
+DB_DATABASE=
+DB_USERNAME=
+DB_PASSWORD=
+```
+
+As demais (`APP_ENV=production`, `APP_DEBUG=false`, `LOG_CHANNEL=stderr`,
+`DB_CONNECTION=mysql`, `DB_PORT=3306`, `CACHE_STORE=database`,
+`SESSION_DRIVER=database`, `QUEUE_CONNECTION=sync` etc.) já vêm definidas
+pelo `render.yaml`.
+
+**`APP_KEY`:** gere uma vez localmente e cole no Render. Nunca rode
+`php artisan key:generate` como parte do deploy — isso invalidaria sessões e
+qualquer dado criptografado a cada novo deploy.
+
+```bash
+php artisan key:generate --show
+```
+
+### 4. Configurar MySQL
+
+Preencha `DB_HOST`, `DB_PORT` (normalmente `3306`), `DB_DATABASE`,
+`DB_USERNAME` e `DB_PASSWORD` com os dados do MySQL externo escolhido (ver
+aviso no topo desta seção). Se o provedor exigir SSL, verifique se ele
+expõe as variáveis/CA necessárias — a conexão MySQL da aplicação já lê
+`MYSQL_ATTR_SSL_CA` quando definida (`config/database.php`).
+
+### 5. Deploy
+
+Com as variáveis configuradas, o Render builda a imagem Docker (Composer →
+npm/Vite → imagem final) e inicia o container. Deploys seguintes acontecem
+automaticamente a cada `git push` na branch configurada
+(`autoDeploy: true`):
+
+```text
+git push → Render builda a imagem → Pre-Deploy: migrate --force → novo container assume o tráfego
+```
+
+### 6. Migration
+
+O `render.yaml` já configura um **Pre-Deploy Command**
+(`php artisan migrate --force`), que roda antes do novo container assumir o
+tráfego — evita o cenário de aplicação nova rodando contra um banco com
+schema desatualizado. Se o seu plano do Render não suportar Pre-Deploy
+Command, rode manualmente pelo Shell do serviço após o deploy:
+
+```bash
+php artisan migrate --force
+```
+
+Seeders **não** rodam automaticamente em produção (nem devem — ver
+[Administrador inicial](#administrador-inicial)). Se algum dia precisar
+popular dados manualmente, faça isso deliberadamente pelo Shell, nunca como
+parte automática do deploy.
+
+### 7. Criar administrador
+
+Pelo Shell do serviço no Render:
+
+```bash
+php artisan admin:create
+```
+
+Responda aos prompts (nome, e-mail, senha). Ver
+[Administrador inicial](#administrador-inicial) para detalhes e opções.
+
+### 8. Verificar
+
+```text
+https://<nome-do-servico>.onrender.com/health   → {"status":"ok"}
+https://<nome-do-servico>.onrender.com/          → Home com a reflexão sorteada
+```
+
+Confira também: login administrativo (`/login`), CRUD de reflexões, o botão
+"Ouvir reflexão" e o QR Code Pix — a lógica é idêntica à local, então se
+tudo passou nos testes automatizados e no teste manual local (ver seção
+seguinte), o comportamento em produção deve ser o mesmo.
+
+### Limitações do plano gratuito
+
+O `render.yaml` usa `plan: free`. Antes de contar com isso para produção
+real, esteja ciente de que o plano gratuito do Render (na formatação atual
+deles, sujeita a mudar — confirme no dashboard):
+
+- **Suspende o serviço por inatividade** e o próximo acesso paga um tempo de
+  inicialização (cold start) enquanto o container sobe de novo. Este
+  projeto **não** cria nenhum mecanismo artificial (cron, ping externo etc.)
+  para manter o serviço acordado — isso violaria os termos de uso de planos
+  gratuitos na maioria das plataformas e só adiaria o problema real, que é
+  precisar de um plano pago para disponibilidade constante.
+- Tem limites de CPU/RAM mais apertados que os planos pagos.
+- Não inclui banco de dados MySQL (ver aviso no topo da seção).
+- Não é adequado para *background workers* de longa duração — este projeto
+  não precisa de nenhum (`QUEUE_CONNECTION=sync`), mas vale saber caso o
+  projeto cresça nessa direção no futuro.
+
+### Armazenamento não é persistente
+
+O filesystem do container **não sobrevive** a um novo deploy. Hoje a
+aplicação não salva nenhum arquivo do usuário em disco (sem upload de
+imagens, sem `storage:link` em uso — só a imagem estática de
+`public/assets/`, que já vai dentro da própria imagem Docker). Se isso
+mudar no futuro (por exemplo, upload de imagens pelas reflexões), a
+aplicação vai precisar de um storage externo (S3, Cloudflare R2 ou
+similar) configurado via `config/filesystems.php` (o disco `s3` já existe
+lá, pronto para configurar via variáveis `AWS_*`) — não implementado agora
+porque não há necessidade atual.
+
+### Logs
+
+Em produção, defina `LOG_CHANNEL=stderr` (já vem assim pelo `render.yaml`):
+é o único canal cujo conteúdo aparece no painel de logs do Render, que
+captura stdout/stderr do container, não arquivos dentro dele
+(`storage/logs/laravel.log` continua existindo como rede de segurança para
+o canal `emergency`, mas não é o que você deve acompanhar no dia a dia).
+
+### HTTPS, proxy e domínio próprio
+
+O Render cuida do certificado HTTPS automaticamente — nada a fazer aqui. A
+aplicação já está configurada para reconhecer corretamente que está atrás
+de HTTPS quando o Render repassa a requisição internamente por HTTP
+(`bootstrap/app.php` confia no proxy do Render via `trustProxies`), o que
+faz `url()`/`asset()`/redirects e o cookie de sessão `secure` funcionarem
+corretamente sem configuração extra.
+
+O domínio inicial é `https://<nome-do-serviço>.onrender.com`. Para trocar
+por um domínio próprio mais tarde, configure-o no Render (Custom Domains) e
+atualize apenas a variável `APP_URL` — nenhuma mudança de código é
+necessária.
+
+### E-mail (esqueci minha senha)
+
+O fluxo "esqueci minha senha" (herdado do Breeze) depende de
+`MAIL_MAILER`. Sem um provedor de e-mail configurado, `MAIL_MAILER=log`
+(padrão) só grava o e-mail no log, sem enviá-lo de verdade — então esse
+fluxo não é utilizável em produção enquanto isso não for configurado.
+Como o projeto tem um único administrador, a forma mais simples de resetar
+uma senha esquecida é `php artisan admin:create --force` pelo Shell do
+Render (não exige e-mail nenhum). Configurar um provedor de e-mail real
+(Resend, Mailgun, SES etc.) fica como decisão futura, fora do escopo desta
+preparação — não foi presumido nenhum provedor.
+
 ## Segurança
 
 - CSRF em todos os formulários (`@csrf`).
@@ -298,9 +522,16 @@ horizontal no mobile.
   é o SVG do QR Code, gerado no servidor a partir da configuração do Pix
   (não é conteúdo enviado por usuário).
 - Credenciais não ficam no código-fonte; `.env` está no `.gitignore`.
-- **Antes de ir para produção:** defina `APP_DEBUG=false`, gere uma
-  `APP_KEY` própria, use senhas fortes para `DB_PASSWORD`/`ADMIN_PASSWORD` e
-  sirva a aplicação sob HTTPS.
+- `GET /health` é público e não autenticado de propósito (é assim que o
+  Render verifica se o serviço está no ar) — responde só `{"status":"ok"}`,
+  sem consultar o banco nem expor nenhuma informação da aplicação.
+- A aplicação confia no proxy reverso do Render (`trustProxies` em
+  `bootstrap/app.php`) para reconhecer HTTPS corretamente; o container em si
+  nunca fica exposto diretamente à internet, só através do proxy do Render.
+- **Checklist antes de produção:** ver seção
+  [Deploy no Render](#deploy-no-render) — `APP_DEBUG=false`, `APP_KEY`
+  própria, credenciais fortes e HTTPS já fazem parte do que está documentado
+  ali.
 
 ## Próximos passos (fora do escopo atual, intencionalmente)
 
