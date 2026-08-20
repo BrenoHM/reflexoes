@@ -6,6 +6,12 @@
 
         <title>{{ config('app.name') }}</title>
 
+        <!-- Favicon: recorte do retrato de Santa Faustina (public/assets/images) -->
+        <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
+        <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
+        <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
+        <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
+
         <!-- Fonts: Playfair Display para títulos, Lora para leitura -->
         <link rel="preconnect" href="https://fonts.bunny.net">
         <link href="https://fonts.bunny.net/css?family=playfair-display:600,700|lora:400,500,600&display=swap" rel="stylesheet" />
