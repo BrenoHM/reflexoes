@@ -17,6 +17,9 @@ PORT="${PORT:-8080}"
 # docker/apache/), substituído aqui pelo valor real de $PORT.
 sed -i "s/__PORT__/${PORT}/g" /etc/apache2/ports.conf /etc/apache2/sites-available/000-default.conf
 
+# Adicione esta linha:
+php artisan migrate --force
+
 # config:cache precisa rodar DEPOIS que as Environment Variables do Render já
 # estão disponíveis no processo - por isso acontece aqui no startup, nunca
 # durante o build da imagem (no build, DB_HOST/APP_KEY/etc. ainda não têm os
